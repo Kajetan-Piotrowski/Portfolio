@@ -24,6 +24,7 @@
         <a href="#o-mnie">O Mnie</a>
         <a href="#osiagniecia">Osiągnięcia</a>
         <a href="#projekty">Projekty</a>
+        <a href="#aktualnosci">Aktualności</a>
         <a href="#program">Program wyborczy</a>
         <a href="#ulotki">Ulotki</a>
          <a href="#Gallery">Galeria zdjęć</a>
@@ -192,6 +193,23 @@
       </div>
     </section>
 
+
+    <section class="section news-section" id="aktualnosci">
+      <div class="container">
+        <div class="section-intro split reveal">
+          <div>
+            <p class="kicker">Najnowsze aktualności wprost z moich profilów</p>
+            <h2>Aktualności</h2>
+          </div>
+        </div>
+        <div class="news-status" id="facebook-news-status" role="status" aria-live="polite">Ładowanie aktualności…</div>
+        <div class="news-grid" id="facebook-news-grid" aria-live="polite"></div>
+        <div class="news-more-wrap" id="facebook-news-more-wrap" hidden>
+          <button class="news-more-button" id="facebook-news-more" type="button">Pokaż więcej artykułów</button>
+        </div>
+      </div>
+    </section>
+
     <section class="section gallery-section" id="Gallery">
       <div class="container">
         <div class="section-intro split reveal">
@@ -290,6 +308,20 @@
       <a href="#top">↑ Do góry</a>
     </div>
   </footer>
+
+
+  <dialog class="news-dialog" id="news-article-dialog" aria-labelledby="news-dialog-title">
+    <div class="news-dialog__inner">
+      <button class="news-dialog__close" type="button" aria-label="Zamknij artykuł">×</button>
+      <div class="news-dialog__content">
+        <p class="news-dialog__date"><time></time></p>
+        <h2 id="news-dialog-title"></h2>
+        <div class="news-dialog__images"></div>
+        <div class="news-dialog__body"></div>
+        <a class="news-dialog__source" href="#" target="_blank" rel="noopener noreferrer">Oryginalny post na Facebooku ↗</a>
+      </div>
+    </div>
+  </dialog>
 
   <script src="script.js"></script>
 </body>
