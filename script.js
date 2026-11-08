@@ -419,7 +419,7 @@ if ('IntersectionObserver' in window) {
       articles = Array.isArray(payload.articles) ? payload.articles : [];
       articles.sort((a, b) => new Date(b.publishedAt || 0) - new Date(a.publishedAt || 0));
       if (!articles.length) {
-        status.textContent = 'Artykuły pojawią się tutaj po pierwszej synchronizacji z Facebookiem.';
+        status.textContent = 'Aktualności są chwilowo niedostępne. Oryginalne publikacje pozostają na Facebooku.';
         moreWrap.hidden = true;
         return;
       }
