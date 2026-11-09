@@ -1,0 +1,85 @@
+name: Facebook – synchronizacja aktualności
+
+on:
+  push:
+    branches:
+      - main
+  schedule:
+    # Synchronizacja mniej więcej co 30 minut (UTC).
+    - cron: '17,47 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: portfolio-facebook-pages
+  cancel-in-progress: false
+
+jobs:
+  sync-and-deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+
+    steps:
+      - name: Pobranie repozytorium
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: true
+
+      - name: Sprawdzenie plików integracji
+        run: |
+          test -f scripts/sync-facebook.mjs || { echo "Brak scripts/sync-facebook.mjs. Wgraj pliki integracji Facebooka."; exit 1; }
+          test -f aktualnosci/articles.json || { echo "Brak aktualnosci/articles.json. Wgraj pliki integracji Facebooka."; exit 1; }
+          test -f index.html || { echo "Brak index.html."; exit 1; }
+          test -f aktualnosci.css || { echo "Brak aktualnosci.css. Wgraj pliki integracji Facebooka."; exit 1; }
+
+      - name: Konfiguracja Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          package-manager-cache: false
+
+      - name: Synchronizacja postów z Facebooka
+        env:
+          META_PAGE_ID: ${{ vars.META_PAGE_ID }}
+          META_PAGE_ACCESS_TOKEN: ${{ secrets.META_PAGE_ACCESS_TOKEN }}
+          META_GRAPH_API_VERSION: ${{ vars.META_GRAPH_API_VERSION }}
+          META_MAX_POSTS: ${{ vars.META_MAX_POSTS }}
+        run: node scripts/sync-facebook.mjs
+
+      - name: Zapisanie artykułów w repozytorium
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add aktualnosci/articles.json
+          if ! git diff --cached --quiet; then
+            git commit -m "Aktualizacja artykułów z Facebooka"
+            git push
+          else
+            echo "Brak zmian w aktualnościach."
+          fi
+
+      - name: Konfiguracja GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Przygotowanie katalogu publikacji
+        run: |
+          rm -rf _site
+          mkdir -p _site
+          cp index.html style.css aktualnosci.css script.js _site/
+          cp -R assets aktualnosci _site/
+          if [ -f CNAME ]; then cp CNAME _site/CNAME; fi
+          touch _site/.nojekyll
+
+      - name: Przygotowanie plików GitHub Pages
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: _site
+
+      - name: Publikacja strony
+        id: deployment
+        uses: actions/deploy-pages@v4
