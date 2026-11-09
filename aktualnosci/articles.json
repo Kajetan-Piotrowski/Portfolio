@@ -1,20 +1,6 @@
 {
   "pageName": null,
   "generatedAt": null,
-  "articles": [{
-  "id": "post-1",
-  "title": "Za nami pierwsza sesja XII kadencji MRM",
-  "excerpt": "Odbyła się pierwsza sesja nowej kadencji.",
-  "content": "Pełna treść artykułu.",
-  "publishedAt": "2026-11-05",
-  "permalink": null,
-  "image": "aktualnosci/zdjecia/sesja-mrm.jpg",
-  "images": [
-    "aktualnosci/zdjecia/sesja-mrm.jpg",
-    "aktualnosci/zdjecia/radni.jpg",
-    "aktualnosci/zdjecia/spotkanie.jpg"
-  ],
-  "source": "Facebook"
-}]
+  "articles": []
 }
 
