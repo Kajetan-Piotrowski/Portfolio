@@ -43,12 +43,18 @@ jobs:
           package-manager-cache: false
 
       - name: Synchronizacja postów z Facebooka
+        id: facebook_sync
         env:
           META_PAGE_ID: ${{ vars.META_PAGE_ID }}
           META_PAGE_ACCESS_TOKEN: ${{ secrets.META_PAGE_ACCESS_TOKEN }}
           META_GRAPH_API_VERSION: ${{ vars.META_GRAPH_API_VERSION }}
           META_MAX_POSTS: ${{ vars.META_MAX_POSTS }}
         run: node scripts/sync-facebook.mjs
+
+      - name: Informacja o pominiętej synchronizacji Facebooka
+        if: steps.facebook_sync.outputs.status != ''
+        run: |
+          echo "::warning::Synchronizacja Facebooka została pominięta: ${{ steps.facebook_sync.outputs.status }}. Publikowana jest ostatnia zapisana wersja archiwum."
 
       - name: Zapisanie artykułów w repozytorium
         run: |
