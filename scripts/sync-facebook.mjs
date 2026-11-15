@@ -26,7 +26,7 @@ if (!ACCESS_TOKEN) {
   const message = 'Brak META_USER_ACCESS_TOKEN. Nie pobrano nowych postów profilu; zachowano dotychczasowe archiwum.';
   console.log(`::warning title=Synchronizacja profilu Facebook pominięta::${message}`);
   if (process.env.GITHUB_OUTPUT) {
-    await appendFile(process.env.GITHUB_OUTPUT, 'status=missing_user_token\\n');
+    await appendFile(process.env.GITHUB_OUTPUT, 'status=missing_user_token\n');
   }
   process.exit(0);
 }
@@ -334,7 +334,7 @@ try {
   } else {
     output.generatedAt = new Date().toISOString();
     await mkdir(dirname(OUTPUT), { recursive: true });
-    await writeFile(OUTPUT, `${JSON.stringify(output, null, 2)}\\n`, 'utf8');
+    await writeFile(OUTPUT, `${JSON.stringify(output, null, 2)}\n`, 'utf8');
     console.log(`Zapisano ${articles.length} postów profilu ${profile.name}. Nowe lub zaktualizowane wpisy: ${newArticles.length}. Zapisano lokalnie do ${MAX_IMAGE_DOWNLOADS_PER_RUN - imageBudget.remaining} zdjęć.`);
   }
 } catch (error) {
@@ -343,7 +343,7 @@ try {
     const warning = 'Token użytkownika Meta wygasł lub został unieważniony (kod 190). Nie pobrano nowych postów profilu; zachowano ostatnie archiwum.';
     console.log(`::warning title=Token profilu Facebook wygasł::${warning}`);
     if (process.env.GITHUB_OUTPUT) {
-      await appendFile(process.env.GITHUB_OUTPUT, 'status=expired_token\\n');
+      await appendFile(process.env.GITHUB_OUTPUT, 'status=expired_token\n');
     }
   } else {
     throw error;
