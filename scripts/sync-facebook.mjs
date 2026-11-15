@@ -282,7 +282,7 @@ try {
   } else {
     output.generatedAt = new Date().toISOString();
     await mkdir(dirname(OUTPUT), { recursive: true });
-    await writeFile(OUTPUT, `${JSON.stringify(output, null, 2)}\\n`, 'utf8');
+    await writeFile(OUTPUT, `${JSON.stringify(output, null, 2)}\n`, 'utf8');
     console.log(`Zapisano ${articles.length} artykułów. Nowe lub zaktualizowane posty: ${newArticles.length}. Zapisano lokalnie do ${MAX_IMAGE_DOWNLOADS_PER_RUN - imageBudget.remaining} zdjęć.`);
   }
 } catch (error) {
