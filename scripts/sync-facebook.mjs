@@ -1,14 +1,14 @@
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, appendFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 
 const PAGE_ID = process.env.META_PAGE_ID?.trim();
 const ACCESS_TOKEN = process.env.META_PAGE_ACCESS_TOKEN?.trim();
 const GRAPH_VERSION = process.env.META_GRAPH_API_VERSION?.trim() || 'v27.0';
-const MAX_POSTS = Math.min(500, Math.max(1, Number.parseInt(process.env.META_MAX_POSTS || '100', 10) || 100));
+const MAX_POSTS = Math.min(600, Math.max(1, Number.parseInt(process.env.META_MAX_POSTS || '600', 10) || 600));
 const OUTPUT = resolve('aktualnosci/articles.json');
 const MEDIA_DIR = resolve('assets/aktualnosci');
 const MEDIA_PREFIX = 'assets/aktualnosci/';
-const MAX_IMAGES_PER_ARTICLE = 8;
+const MAX_IMAGES_PER_ARTICLE = 18;
 const MAX_IMAGE_DOWNLOADS_PER_RUN = 60;
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 
@@ -19,11 +19,15 @@ const FIELDS = [
   'created_time',
   'permalink_url',
   'full_picture',
-  'attachments{media_type,media,subattachments{media_type,media}}'
+  'attachments{media_type,media,subattachments.limit(18){media_type,media}}'
 ].join(',');
 
 if (!PAGE_ID || !ACCESS_TOKEN) {
-  console.warn('META_PAGE_ID lub META_PAGE_ACCESS_TOKEN nie jest ustawiony. Synchronizacja pominięta.');
+  const message = 'Brak META_PAGE_ID lub META_PAGE_ACCESS_TOKEN. Nie pobrano nowych postów; zachowano dotychczasowe archiwum.';
+  console.log(`::warning title=Synchronizacja Facebooka pominięta::${message}`);
+  if (process.env.GITHUB_OUTPUT) {
+    await appendFile(process.env.GITHUB_OUTPUT, 'status=missing_credentials\\n');
+  }
   process.exit(0);
 }
 
@@ -58,17 +62,30 @@ function collectImages(post) {
   return [...images].slice(0, MAX_IMAGES_PER_ARTICLE);
 }
 
-function makeTitle(text, hasImages) {
-  if (!text) return hasImages ? 'Publikacja zdjęciowa' : 'Aktualność z Facebooka';
+function makeTitle(text, hasImages, attachmentTypes = []) {
+  if (!text) {
+    if (hasImages) return 'Publikacja zdjęciowa';
+    if (attachmentTypes.includes('video')) return 'Publikacja wideo';
+    if (attachmentTypes.includes('link')) return 'Udostępniony link';
+    if (attachmentTypes.includes('album')) return 'Album zdjęć';
+    return 'Publikacja z Facebooka';
+  }
   const firstLine = text.split(/\r?\n/).map(line => line.trim()).find(Boolean) || text;
   const sentence = firstLine.match(/^.{1,110}?[.!?](?:\s|$)/u)?.[0]?.trim();
   let title = firstLine.length <= 90 ? firstLine : (sentence || `${firstLine.slice(0, 87).trimEnd()}…`);
   return title.replace(/\s+/g, ' ').trim();
 }
 
-function makeExcerpt(text, title, hasImages) {
+function makeExcerpt(text, title, hasImages, attachmentTypes = []) {
   const remaining = text.startsWith(title) ? text.slice(title.length).trim() : text;
-  const candidate = remaining || text || (hasImages ? 'Fotorelacja opublikowana na stronie Facebook.' : 'Nowa publikacja na stronie Facebook.');
+  const attachmentFallback = attachmentTypes.includes('video')
+    ? 'Materiał wideo opublikowany na Facebooku.'
+    : attachmentTypes.includes('link')
+      ? 'Link udostępniony na Facebooku.'
+      : hasImages
+        ? 'Fotorelacja opublikowana na Facebooku.'
+        : 'Nowa publikacja na Facebooku.';
+  const candidate = remaining || text || attachmentFallback;
   return candidate.length > 210 ? `${candidate.slice(0, 207).trimEnd()}…` : candidate;
 }
 
@@ -86,7 +103,7 @@ function normalizePost(post) {
   return {
     id: String(post.id),
     title,
-    excerpt: makeExcerpt(text, title, images.length > 0),
+    excerpt: makeExcerpt(text, title, images.length > 0, attachmentTypes),
     content,
     publishedAt: post.created_time || null,
     permalink: safeHttpsUrl(post.permalink_url),
@@ -220,12 +237,13 @@ async function fetchRecentPosts() {
   let after;
   while (posts.length < MAX_POSTS) {
     const limit = Math.min(100, MAX_POSTS - posts.length);
-    const payload = await graphGet(`${encodeURIComponent(PAGE_ID)}/posts`, {
+    const payload = await graphGet(`${encodeURIComponent(PAGE_ID)}/published_posts`, {
       fields: FIELDS,
       limit,
       ...(after ? { after } : {})
     });
     posts.push(...(payload.data || []));
+    console.log(`Pobrano stronę ${Math.ceil(posts.length / 100)} wyników Graph API; łącznie: ${posts.length}.`);
     after = payload.paging?.cursors?.after;
     if (!after || !(payload.data || []).length) break;
   }
@@ -258,8 +276,7 @@ try {
   for (const article of newArticles) merged.set(article.id, article);
 
   const sorted = [...merged.values()]
-    .sort((a, b) => new Date(b.publishedAt || 0) - new Date(a.publishedAt || 0))
-    .slice(0, 250);
+    .sort((a, b) => new Date(b.publishedAt || 0) - new Date(a.publishedAt || 0));
 
   // Zdjęcia z Facebooka są kopiowane do repozytorium. Adresy CDN Facebooka
   // mogą wygasać, dlatego strona nie powinna polegać na nich bezpośrednio.
@@ -288,7 +305,11 @@ try {
 } catch (error) {
   const message = error instanceof Error ? error.message : String(error);
   if (/kod 190|error validating access token|session has expired/i.test(message)) {
-    console.error('OSTRZEŻENIE: Token Meta wygasł lub został unieważniony. Synchronizacja Facebooka została pominięta; publikacja strony będzie kontynuowana z ostatnim zapisanym archiwum.');
+    const warning = 'Token Meta wygasł lub został unieważniony (kod 190). Nie pobrano nowych postów. Zachowano ostatnie archiwum, a workflow może opublikować dotychczasową stronę.';
+    console.log(`::warning title=Token Facebooka wygasł::${warning}`);
+    if (process.env.GITHUB_OUTPUT) {
+      await appendFile(process.env.GITHUB_OUTPUT, 'status=expired_token\\n');
+    }
   } else {
     throw error;
   }
