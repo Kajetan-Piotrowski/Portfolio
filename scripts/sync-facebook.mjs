@@ -26,7 +26,7 @@ if (!PAGE_ID || !ACCESS_TOKEN) {
   const message = 'Brak META_PAGE_ID lub META_PAGE_ACCESS_TOKEN. Nie pobrano nowych postów; zachowano dotychczasowe archiwum.';
   console.log(`::warning title=Synchronizacja Facebooka pominięta::${message}`);
   if (process.env.GITHUB_OUTPUT) {
-    await appendFile(process.env.GITHUB_OUTPUT, 'status=missing_credentials\\n');
+    await appendFile(process.env.GITHUB_OUTPUT, 'status=missing_credentials\n');
   }
   process.exit(0);
 }
@@ -312,7 +312,7 @@ try {
     const warning = 'Token Meta wygasł lub został unieważniony (kod 190). Nie pobrano nowych postów. Zachowano ostatnie archiwum, a workflow może opublikować dotychczasową stronę.';
     console.log(`::warning title=Token Facebooka wygasł::${warning}`);
     if (process.env.GITHUB_OUTPUT) {
-      await appendFile(process.env.GITHUB_OUTPUT, 'status=expired_token\\n');
+      await appendFile(process.env.GITHUB_OUTPUT, 'status=expired_token\n');
     }
   } else {
     throw error;
