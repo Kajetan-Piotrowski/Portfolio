@@ -1,8 +1,8 @@
 import { readFile, writeFile, mkdir, appendFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 
-const PAGE_ID = process.env.META_PAGE_ID?.trim();
-const ACCESS_TOKEN = process.env.META_PAGE_ACCESS_TOKEN?.trim();
+const ACCESS_TOKEN = process.env.META_USER_ACCESS_TOKEN?.trim();
+const EXPECTED_PROFILE_NAME = process.env.META_EXPECTED_PROFILE_NAME?.trim() || 'Kajetan Piotrowski';
 const GRAPH_VERSION = process.env.META_GRAPH_API_VERSION?.trim() || 'v27.0';
 const MAX_POSTS = Math.min(600, Math.max(1, Number.parseInt(process.env.META_MAX_POSTS || '600', 10) || 600));
 const OUTPUT = resolve('aktualnosci/articles.json');
@@ -22,11 +22,11 @@ const FIELDS = [
   'attachments{media_type,media,subattachments.limit(18){media_type,media}}'
 ].join(',');
 
-if (!PAGE_ID || !ACCESS_TOKEN) {
-  const message = 'Brak META_PAGE_ID lub META_PAGE_ACCESS_TOKEN. Nie pobrano nowych postów; zachowano dotychczasowe archiwum.';
-  console.log(`::warning title=Synchronizacja Facebooka pominięta::${message}`);
+if (!ACCESS_TOKEN) {
+  const message = 'Brak META_USER_ACCESS_TOKEN. Nie pobrano nowych postów profilu; zachowano dotychczasowe archiwum.';
+  console.log(`::warning title=Synchronizacja profilu Facebook pominięta::${message}`);
   if (process.env.GITHUB_OUTPUT) {
-    await appendFile(process.env.GITHUB_OUTPUT, 'status=missing_credentials\n');
+    await appendFile(process.env.GITHUB_OUTPUT, 'status=missing_user_token\\n');
   }
   process.exit(0);
 }
@@ -241,13 +241,13 @@ async function fetchRecentPosts() {
   let after;
   while (posts.length < MAX_POSTS) {
     const limit = Math.min(100, MAX_POSTS - posts.length);
-    const payload = await graphGet(`${encodeURIComponent(PAGE_ID)}/published_posts`, {
+    const payload = await graphGet('me/posts', {
       fields: FIELDS,
       limit,
       ...(after ? { after } : {})
     });
     posts.push(...(payload.data || []));
-    console.log(`Pobrano stronę ${Math.ceil(posts.length / 100)} wyników Graph API; łącznie: ${posts.length}.`);
+    console.log(`Pobrano ${posts.length} postów /me/posts.`);
     after = payload.paging?.cursors?.after;
     if (!after || !(payload.data || []).length) break;
   }
@@ -258,6 +258,8 @@ async function readExisting() {
   try {
     const parsed = JSON.parse(await readFile(OUTPUT, 'utf8'));
     return {
+      sourceType: parsed.sourceType || null,
+      profileId: parsed.profileId || null,
       pageName: parsed.pageName || null,
       generatedAt: parsed.generatedAt || null,
       articles: Array.isArray(parsed.articles) ? parsed.articles : []
@@ -272,18 +274,34 @@ async function readExisting() {
 await mkdir(MEDIA_DIR, { recursive: true });
 
 try {
-  const pageDetails = await graphGet(encodeURIComponent(PAGE_ID), { fields: 'name' });
+  // /me wskazuje użytkownika przypisanego do tokena. Jego ID jest app-scoped
+  // i nie musi być takie samo jak publiczne ID widoczne w adresie profilu.
+  const profile = await graphGet('me', { fields: 'id,name' });
+  if (
+    !profile.id ||
+    !profile.name ||
+    !profile.name.toLowerCase().includes(EXPECTED_PROFILE_NAME.toLowerCase())
+  ) {
+    throw new Error(
+      `Token należy do innego profilu niż oczekiwany. Otrzymano: ${profile.name || 'brak nazwy'} (ID aplikacji: ${profile.id || 'brak'}).`
+    );
+  }
+
   const rawPosts = await fetchRecentPosts();
   const newArticles = rawPosts.map(normalizePost).filter(Boolean);
   const existing = await readExisting();
-  const merged = new Map(existing.articles.map(article => [String(article.id), article]));
+
+  // Nie mieszaj starego archiwum zarządzanej strony z postami profilu.
+  // Po pierwszej udanej synchronizacji profil staje się jedynym źródłem.
+  const profileArticles = existing.sourceType === 'facebook_profile'
+    ? existing.articles
+    : [];
+  const merged = new Map(profileArticles.map(article => [String(article.id), article]));
   for (const article of newArticles) merged.set(article.id, article);
 
   const sorted = [...merged.values()]
     .sort((a, b) => new Date(b.publishedAt || 0) - new Date(a.publishedAt || 0));
 
-  // Zdjęcia z Facebooka są kopiowane do repozytorium. Adresy CDN Facebooka
-  // mogą wygasać, dlatego strona nie powinna polegać na nich bezpośrednio.
   const imageBudget = { remaining: MAX_IMAGE_DOWNLOADS_PER_RUN };
   const articles = [];
   for (const article of sorted) {
@@ -291,28 +309,41 @@ try {
   }
 
   const output = {
-    pageName: pageDetails.name || existing.pageName || 'Facebook',
+    sourceType: 'facebook_profile',
+    profileId: profile.id,
+    pageName: profile.name,
     generatedAt: existing.generatedAt,
     articles
   };
 
-  const oldComparable = JSON.stringify({ pageName: existing.pageName, articles: existing.articles });
-  const newComparable = JSON.stringify({ pageName: output.pageName, articles: output.articles });
+  const oldComparable = JSON.stringify({
+    sourceType: existing.sourceType,
+    profileId: existing.profileId,
+    pageName: existing.pageName,
+    articles: existing.articles
+  });
+  const newComparable = JSON.stringify({
+    sourceType: output.sourceType,
+    profileId: output.profileId,
+    pageName: output.pageName,
+    articles: output.articles
+  });
+
   if (oldComparable === newComparable) {
-    console.log(`Synchronizacja zakończona. Brak zmian; sprawdzono ${rawPosts.length} publikacji. Pozostały limit zdjęć: ${imageBudget.remaining}.`);
+    console.log(`Synchronizacja profilu zakończona. Brak zmian; sprawdzono ${rawPosts.length} postów. Pozostały limit zdjęć: ${imageBudget.remaining}.`);
   } else {
     output.generatedAt = new Date().toISOString();
     await mkdir(dirname(OUTPUT), { recursive: true });
-    await writeFile(OUTPUT, `${JSON.stringify(output, null, 2)}\n`, 'utf8');
-    console.log(`Zapisano ${articles.length} artykułów. Nowe lub zaktualizowane posty: ${newArticles.length}. Zapisano lokalnie do ${MAX_IMAGE_DOWNLOADS_PER_RUN - imageBudget.remaining} zdjęć.`);
+    await writeFile(OUTPUT, `${JSON.stringify(output, null, 2)}\\n`, 'utf8');
+    console.log(`Zapisano ${articles.length} postów profilu ${profile.name}. Nowe lub zaktualizowane wpisy: ${newArticles.length}. Zapisano lokalnie do ${MAX_IMAGE_DOWNLOADS_PER_RUN - imageBudget.remaining} zdjęć.`);
   }
 } catch (error) {
   const message = error instanceof Error ? error.message : String(error);
   if (/kod 190|error validating access token|session has expired/i.test(message)) {
-    const warning = 'Token Meta wygasł lub został unieważniony (kod 190). Nie pobrano nowych postów. Zachowano ostatnie archiwum, a workflow może opublikować dotychczasową stronę.';
-    console.log(`::warning title=Token Facebooka wygasł::${warning}`);
+    const warning = 'Token użytkownika Meta wygasł lub został unieważniony (kod 190). Nie pobrano nowych postów profilu; zachowano ostatnie archiwum.';
+    console.log(`::warning title=Token profilu Facebook wygasł::${warning}`);
     if (process.env.GITHUB_OUTPUT) {
-      await appendFile(process.env.GITHUB_OUTPUT, 'status=expired_token\n');
+      await appendFile(process.env.GITHUB_OUTPUT, 'status=expired_token\\n');
     }
   } else {
     throw error;
