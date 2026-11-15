@@ -90,12 +90,17 @@ function makeExcerpt(text, title, hasImages, attachmentTypes = []) {
 }
 
 function normalizePost(post) {
-  const text = String(post.message || post.story || '').replace(/\u0000/g, '').trim();
+  const text = String(post.message || post.story || '').replace(/\\u0000/g, '').trim();
   const images = collectImages(post);
-  if (!text && images.length === 0) return null;
+  const attachments = post.attachments?.data ?? [];
+  const attachmentTypes = attachments
+    .map(item => String(item.media_type || '').toLowerCase())
+    .filter(Boolean);
 
-  const title = makeTitle(text, images.length > 0);
-  const firstLine = text.split(/\r?\n/).map(line => line.trim()).find(Boolean) || '';
+  if (!text && images.length === 0 && attachments.length === 0) return null;
+
+  const title = makeTitle(text, images.length > 0, attachmentTypes);
+  const firstLine = text.split(/\\r?\\n/).map(line => line.trim()).find(Boolean) || '';
   const content = firstLine && firstLine === title
     ? text.slice(text.indexOf(firstLine) + firstLine.length).trim()
     : text;
@@ -112,7 +117,6 @@ function normalizePost(post) {
     source: 'Facebook'
   };
 }
-
 
 function imageExtension(contentType, sourceUrl) {
   const type = String(contentType || '').split(';')[0].trim().toLowerCase();
