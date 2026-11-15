@@ -331,6 +331,7 @@ if ('IntersectionObserver' in window) {
       image.src = url;
       image.alt = `${article.title || 'Zdjęcie z publikacji'}${imageUrls.length > 1 ? ` – ${index + 1}` : ''}`;
       image.loading = 'lazy';
+      image.addEventListener('error', () => image.remove(), { once: true });
       dialogImages.appendChild(image);
     });
 
@@ -365,6 +366,11 @@ if ('IntersectionObserver' in window) {
       image.src = imageUrl;
       image.alt = article.title || 'Zdjęcie z publikacji na Facebooku';
       image.loading = 'lazy';
+      image.addEventListener('error', () => {
+        image.remove();
+        imageWrap.classList.add('news-card__image-wrap--missing');
+        imageWrap.appendChild(makeElement('span', 'news-card__image-fallback', 'Zdjęcie niedostępne'));
+      }, { once: true });
       imageWrap.appendChild(image);
       card.appendChild(imageWrap);
     } else {
