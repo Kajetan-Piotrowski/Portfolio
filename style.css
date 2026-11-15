@@ -473,3 +473,24 @@ body.media-lightbox-open { overflow: hidden; }
   .news-dialog__content { padding: 22px 18px; }
 }
 @media (prefers-reduced-motion: reduce) { .news-card, .news-card__read, .news-more-button { transition: none; } }
+
+
+/* Awaryjny wygląd kart, gdy Facebook zwróci wygasły lub niedostępny adres zdjęcia. */
+.news-card__image-wrap--missing {
+  display: grid;
+  place-items: center;
+  background:
+    radial-gradient(circle at 15% 15%, rgba(255,225,26,.96), transparent 48%),
+    linear-gradient(135deg, #fff8c4 0%, #ffffff 50%, #d9efff 100%);
+}
+.news-card__image-fallback {
+  padding: 14px;
+  color: rgba(17,17,17,.55);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .12em;
+  text-align: center;
+  text-transform: uppercase;
+}
+.news-card__image-wrap img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.news-dialog__image { min-height: 0; }
