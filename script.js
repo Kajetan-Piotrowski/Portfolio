@@ -303,6 +303,19 @@ if ('IntersectionObserver' in window) {
     }
   };
 
+  const safeMediaUrl = value => {
+    if (typeof value !== 'string' || !value.trim()) return '';
+    try {
+      const url = new URL(value, window.location.href);
+      if (url.protocol !== 'https:') return '';
+      const isSameOriginAsset = url.origin === window.location.origin &&
+        (url.pathname.startsWith('/assets/') || url.pathname.startsWith('/aktualnosci/'));
+      return isSameOriginAsset || url.origin !== window.location.origin ? url.href : '';
+    } catch {
+      return '';
+    }
+  };
+
   const formatDate = value => {
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return 'Data publikacji niedostępna';
@@ -326,7 +339,7 @@ if ('IntersectionObserver' in window) {
     dialogBody.replaceChildren();
 
     const imageUrls = Array.isArray(article.images) ? article.images : (article.image ? [article.image] : []);
-    imageUrls.map(safeHttpsUrl).filter(Boolean).slice(0, 10).forEach((url, index) => {
+    imageUrls.map(safeMediaUrl).filter(Boolean).slice(0, 10).forEach((url, index) => {
       const image = makeElement('img', 'news-dialog__image');
       image.src = url;
       image.alt = `${article.title || 'Zdjęcie z publikacji'}${imageUrls.length > 1 ? ` – ${index + 1}` : ''}`;
@@ -359,7 +372,7 @@ if ('IntersectionObserver' in window) {
 
   const createCard = article => {
     const card = makeElement('article', 'news-card');
-    const imageUrl = safeHttpsUrl(article.image || (Array.isArray(article.images) ? article.images[0] : ''));
+    const imageUrl = safeMediaUrl(article.image || (Array.isArray(article.images) ? article.images[0] : ''));
     if (imageUrl) {
       const imageWrap = makeElement('div', 'news-card__image-wrap');
       const image = makeElement('img', 'news-card__image');
