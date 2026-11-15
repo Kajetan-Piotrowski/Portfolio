@@ -6,6 +6,11 @@ const ACCESS_TOKEN = process.env.META_PAGE_ACCESS_TOKEN?.trim();
 const GRAPH_VERSION = process.env.META_GRAPH_API_VERSION?.trim() || 'v27.0';
 const MAX_POSTS = Math.min(500, Math.max(1, Number.parseInt(process.env.META_MAX_POSTS || '100', 10) || 100));
 const OUTPUT = resolve('aktualnosci/articles.json');
+const MEDIA_DIR = resolve('assets/aktualnosci');
+const MEDIA_PREFIX = 'assets/aktualnosci/';
+const MAX_IMAGES_PER_ARTICLE = 8;
+const MAX_IMAGE_DOWNLOADS_PER_RUN = 60;
+const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 
 const FIELDS = [
   'id',
@@ -50,7 +55,7 @@ function collectImages(post) {
     const children = attachment.subattachments?.data ?? [];
     for (const child of children) add(child.media?.image?.src);
   }
-  return [...images].slice(0, 12);
+  return [...images].slice(0, MAX_IMAGES_PER_ARTICLE);
 }
 
 function makeTitle(text, hasImages) {
@@ -88,6 +93,106 @@ function normalizePost(post) {
     image: images[0] || null,
     images,
     source: 'Facebook'
+  };
+}
+
+
+function imageExtension(contentType, sourceUrl) {
+  const type = String(contentType || '').split(';')[0].trim().toLowerCase();
+  const fromType = {
+    'image/jpeg': 'jpg',
+    'image/jpg': 'jpg',
+    'image/png': 'png',
+    'image/webp': 'webp',
+    'image/gif': 'gif',
+    'image/avif': 'avif'
+  }[type];
+  if (fromType) return fromType;
+
+  try {
+    const extension = new URL(sourceUrl).pathname.split('.').pop()?.toLowerCase();
+    if (['jpg', 'jpeg', 'png', 'webp', 'gif', 'avif'].includes(extension)) {
+      return extension === 'jpeg' ? 'jpg' : extension;
+    }
+  } catch {}
+  return 'jpg';
+}
+
+async function cacheArticleImages(article, budget) {
+  const original = Array.isArray(article.images) && article.images.length
+    ? article.images
+    : (article.image ? [article.image] : []);
+  const unique = [];
+  const seen = new Set();
+
+  for (const value of original) {
+    if (typeof value !== 'string' || !value.trim()) continue;
+    const local = value.startsWith(MEDIA_PREFIX);
+    const remote = local ? null : safeHttpsUrl(value);
+    if (!local && !remote) continue;
+    let key = local ? value : remote;
+    if (remote) {
+      try {
+        const parsed = new URL(remote);
+        key = parsed.origin + parsed.pathname;
+      } catch {}
+    }
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(local ? value : remote);
+    if (unique.length >= MAX_IMAGES_PER_ARTICLE) break;
+  }
+
+  const cached = [];
+  const safeId = String(article.id || 'post').replace(/[^a-z0-9_-]/gi, '-').slice(-80);
+
+  for (let index = 0; index < unique.length; index += 1) {
+    const source = unique[index];
+    if (source.startsWith(MEDIA_PREFIX)) {
+      cached.push(source);
+      continue;
+    }
+
+    if (budget.remaining <= 0) {
+      cached.push(source);
+      continue;
+    }
+
+    try {
+      const response = await fetch(source, {
+        headers: { 'User-Agent': 'KajetanPortfolio/1.0' },
+        signal: AbortSignal.timeout(20_000)
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+      const contentType = response.headers.get('content-type') || '';
+      if (contentType && !contentType.toLowerCase().startsWith('image/')) {
+        throw new Error('Adres nie zwrócił pliku graficznego');
+      }
+
+      const contentLength = Number(response.headers.get('content-length') || 0);
+      if (contentLength > MAX_IMAGE_BYTES) throw new Error('Zdjęcie przekracza limit 8 MB');
+
+      const bytes = Buffer.from(await response.arrayBuffer());
+      if (!bytes.length || bytes.length > MAX_IMAGE_BYTES) {
+        throw new Error('Plik zdjęcia jest pusty lub przekracza limit 8 MB');
+      }
+
+      const extension = imageExtension(contentType, source);
+      const filename = `${safeId}-${index + 1}.${extension}`;
+      await writeFile(resolve(MEDIA_DIR, filename), bytes);
+      cached.push(`${MEDIA_PREFIX}${filename}`);
+      budget.remaining -= 1;
+    } catch (error) {
+      console.warn(`Nie udało się zapisać zdjęcia posta ${article.id}, zdjęcie ${index + 1}: ${error.message}`);
+      cached.push(source);
+    }
+  }
+
+  return {
+    ...article,
+    image: cached[0] || null,
+    images: cached
   };
 }
 
@@ -141,30 +246,50 @@ async function readExisting() {
   }
 }
 
-const pageDetails = await graphGet(encodeURIComponent(PAGE_ID), { fields: 'name' });
-const rawPosts = await fetchRecentPosts();
-const newArticles = rawPosts.map(normalizePost).filter(Boolean);
-const existing = await readExisting();
-const merged = new Map(existing.articles.map(article => [String(article.id), article]));
-for (const article of newArticles) merged.set(article.id, article);
 
-const articles = [...merged.values()]
-  .sort((a, b) => new Date(b.publishedAt || 0) - new Date(a.publishedAt || 0))
-  .slice(0, 250);
+await mkdir(MEDIA_DIR, { recursive: true });
 
-const output = {
-  pageName: pageDetails.name || existing.pageName || 'Facebook',
-  generatedAt: existing.generatedAt,
-  articles
-};
+try {
+  const pageDetails = await graphGet(encodeURIComponent(PAGE_ID), { fields: 'name' });
+  const rawPosts = await fetchRecentPosts();
+  const newArticles = rawPosts.map(normalizePost).filter(Boolean);
+  const existing = await readExisting();
+  const merged = new Map(existing.articles.map(article => [String(article.id), article]));
+  for (const article of newArticles) merged.set(article.id, article);
 
-const oldComparable = JSON.stringify({ pageName: existing.pageName, articles: existing.articles });
-const newComparable = JSON.stringify({ pageName: output.pageName, articles: output.articles });
-if (oldComparable === newComparable) {
-  console.log(`Synchronizacja zakończona. Brak zmian; sprawdzono ${rawPosts.length} publikacji.`);
-} else {
-  output.generatedAt = new Date().toISOString();
-  await mkdir(dirname(OUTPUT), { recursive: true });
-  await writeFile(OUTPUT, `${JSON.stringify(output, null, 2)}\n`, 'utf8');
-  console.log(`Zapisano ${articles.length} artykułów. Nowe lub zaktualizowane posty: ${newArticles.length}.`);
+  const sorted = [...merged.values()]
+    .sort((a, b) => new Date(b.publishedAt || 0) - new Date(a.publishedAt || 0))
+    .slice(0, 250);
+
+  // Zdjęcia z Facebooka są kopiowane do repozytorium. Adresy CDN Facebooka
+  // mogą wygasać, dlatego strona nie powinna polegać na nich bezpośrednio.
+  const imageBudget = { remaining: MAX_IMAGE_DOWNLOADS_PER_RUN };
+  const articles = [];
+  for (const article of sorted) {
+    articles.push(await cacheArticleImages(article, imageBudget));
+  }
+
+  const output = {
+    pageName: pageDetails.name || existing.pageName || 'Facebook',
+    generatedAt: existing.generatedAt,
+    articles
+  };
+
+  const oldComparable = JSON.stringify({ pageName: existing.pageName, articles: existing.articles });
+  const newComparable = JSON.stringify({ pageName: output.pageName, articles: output.articles });
+  if (oldComparable === newComparable) {
+    console.log(`Synchronizacja zakończona. Brak zmian; sprawdzono ${rawPosts.length} publikacji. Pozostały limit zdjęć: ${imageBudget.remaining}.`);
+  } else {
+    output.generatedAt = new Date().toISOString();
+    await mkdir(dirname(OUTPUT), { recursive: true });
+    await writeFile(OUTPUT, `${JSON.stringify(output, null, 2)}\\n`, 'utf8');
+    console.log(`Zapisano ${articles.length} artykułów. Nowe lub zaktualizowane posty: ${newArticles.length}. Zapisano lokalnie do ${MAX_IMAGE_DOWNLOADS_PER_RUN - imageBudget.remaining} zdjęć.`);
+  }
+} catch (error) {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/kod 190|error validating access token|session has expired/i.test(message)) {
+    console.error('OSTRZEŻENIE: Token Meta wygasł lub został unieważniony. Synchronizacja Facebooka została pominięta; publikacja strony będzie kontynuowana z ostatnim zapisanym archiwum.');
+  } else {
+    throw error;
+  }
 }
